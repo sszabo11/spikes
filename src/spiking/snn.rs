@@ -5,6 +5,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 use crate::spiking::layer::SpikingLayer;
 
+#[allow(non_snake_case)]
 pub struct SpikingNetwork {
     n_layers: usize,
     n_conns: usize,
@@ -19,16 +20,20 @@ pub struct SpikingNetwork {
     pub w_min: f32, // Min weight value
     pub w_max: f32, // Max weight value
 
+    pub T: usize,  // Timesteps
     pub beta: f32, // Leak
     fires: usize,
 }
 
+#[allow(non_snake_case)]
 pub struct SpikingBuilder {
     n_layers: usize,
     layers: Vec<SpikingLayer>,
     beta: f32, // Leak
     n_conns: usize,
     n_neurons: usize,
+
+    pub T: usize, // Timesteps
 }
 
 impl SpikingBuilder {
@@ -41,6 +46,11 @@ impl SpikingBuilder {
         self.n_neurons += num_neurons;
         self.n_conns += num_conns;
 
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn timesteps(mut self, T: usize) -> Self {
+        self.T = T;
         self
     }
 
@@ -61,11 +71,19 @@ impl SpikingBuilder {
     }
 
     pub fn build(self) -> SpikingNetwork {
+        assert!(
+            self.T > 0,
+            "Please specify number of timesteps. Example: `builder.timesteps(10)`"
+        );
+        assert!(self.n_neurons > 0);
+        assert!(self.n_layers > 0);
+        assert!(self.n_conns > 0);
         SpikingNetwork {
             tau_pre: 0.0,
             tau_post: 0.0,
             w_plus: 0.05,
             w_min: -1.0,
+            T: self.T,
             w_max: 1.0,
             w_minus: 0.08,
             n_layers: self.n_layers,
@@ -85,6 +103,7 @@ impl SpikingNetwork {
             layers: vec![],
             beta: 0.9,
             n_conns: 0,
+            T: 0,
             n_neurons: 0,
         }
     }
@@ -97,12 +116,16 @@ impl SpikingNetwork {
         }
     }
 
-    pub fn train_step(&mut self, input: Array1<f32>, label: f32) {
-        self.set_input(input);
+    pub fn step(&mut self, input: Array1<f32>) {
+        // Layer 0 now has t0 valus
+        self.set_input(input); // TODO: Spike train
 
-        self.forward();
+        for l in 1..self.n_layers {
+            let (prev_layer, layer) = self.layers.split_at_mut(l);
 
-        self.decay()
+            let prev_layer = &mut prev_layer[prev_layer.len() - 1];
+            let layer = &mut layer[0];
+        }
     }
 
     fn decay(&mut self) {}
@@ -125,7 +148,6 @@ impl SpikingNetwork {
                 //    "Prev neurons: ({}, {}) | Curr neurons: {}",
                 //    prev_layer.out_n, layer.in_n, layer.out_n
                 //);
-                let mut e = false;
                 for (j, &conn_idx) in connections.iter().enumerate() {
                     //println!("Neuron {}: {}v", i, layer.neurons[i]);
                     let weight = weights[j];
@@ -137,11 +159,6 @@ impl SpikingNetwork {
 
                     // Fire if connected was above threshold
                     if layer.neurons[i] > threshold {
-                        if e {
-                            weights[j] += self.w_minus;
-                            layer.neurons[i] = 0.0;
-                        }
-                        e = true;
                         self.fires += 1;
                         weights[j] += self.w_plus;
                         layer.neurons[i] = 1.0;

@@ -13,6 +13,7 @@ fn main() {
         .layer(50, 2)
         .layer(10, 1)
         .beta(0.9)
+        .timesteps(10)
         .build();
 
     let mnist = get_mnist();
