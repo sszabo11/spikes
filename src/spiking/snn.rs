@@ -2,8 +2,9 @@ use colored::Colorize;
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use sdl2::sys::NorthEastGravity;
 
-use crate::spiking::layer::SpikingLayer;
+use crate::spiking::layer::{LayerConfig, SpikingLayer};
 
 #[allow(non_snake_case)]
 pub struct SpikingNetwork {
@@ -46,15 +47,16 @@ impl SpikingBuilder {
     pub fn input_layer(mut self, num_neurons: usize, num_conns: usize, input_len: usize) -> Self {
         assert!(self.threshold != -10.0, "Please specify threshold");
         assert!(self.n_layers == 0 && self.layers.is_empty());
-        self.layers.push(SpikingLayer::new(
-            input_len,
-            num_neurons,
+        self.layers.push(SpikingLayer::new(LayerConfig {
+            in_n: input_len,
+            out_n: num_neurons,
             num_conns,
-            self.tau_pre,
-            self.tau_post,
-            self.threshold,
-            self.top_k,
-        ));
+            tau_pre: self.tau_pre,
+            tau_post: self.tau_post,
+            threshold: self.threshold,
+            top_k: self.top_k,
+            id: 1,
+        }));
 
         self.n_layers = 1;
         self.n_neurons += num_neurons;
@@ -82,15 +84,16 @@ impl SpikingBuilder {
     }
     pub fn layer(mut self, num_neurons: usize, num_conns: usize) -> Self {
         let in_neurons = self.layers[self.n_layers - 1].out_n;
-        self.layers.push(SpikingLayer::new(
-            in_neurons,
-            num_neurons,
+        self.layers.push(SpikingLayer::new(LayerConfig {
+            in_n: in_neurons,
+            out_n: num_neurons,
             num_conns,
-            self.tau_pre,
-            self.tau_post,
-            self.threshold,
-            self.top_k,
-        ));
+            tau_pre: self.tau_pre,
+            tau_post: self.tau_post,
+            threshold: self.threshold,
+            top_k: self.top_k,
+            id: self.n_layers + 1,
+        }));
 
         self.n_layers += 1;
         self.n_neurons += num_neurons;
@@ -177,13 +180,11 @@ impl SpikingNetwork {
     pub fn run(&mut self, input: Array2<usize>) -> Array1<f32> {
         let input = input.mapv(|v| v as f32);
 
-        let mut pre_spikes = input.row(0).to_owned();
         for t in 0..input.nrows() {
+            let mut pre_spikes = input.row(0).to_owned();
             println!("T: {}", t);
             // Current timestep values
-            for p in pre_spikes.iter() {
-                println!("Pre: {}", p);
-            }
+            for p in pre_spikes.iter() {}
 
             for l in 0..self.n_layers {
                 let layer = self.layers.get_mut(l).unwrap();
@@ -271,13 +272,14 @@ impl SpikingNetwork {
     }
 
     pub fn print_details(&self) {
+        let fired: usize = self.layers.iter().map(|l| l.fired).sum();
         println!(
             "Neurons: {} | Connections: {} | Threshold: {} | Fired: {} Fired %: {}%",
             self.n_neurons,
             self.n_conns * self.n_neurons,
             self.layers[0].thresholds[0],
-            self.fires,
-            self.fires as f32 / self.n_neurons as f32 * 100.0
+            fired,
+            fired as f32 / self.n_neurons as f32 * 100.0 / self.T as f32
         );
     }
 }

@@ -2,13 +2,13 @@ use flatland::{data::get_mnist, spiking::snn::SpikingNetwork};
 use ndarray::{Array2, ArrayView2, Axis, array};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-const T: usize = 1;
+const T: usize = 5;
 const INPUT_DIM: usize = 784;
 
 fn main() {
     let mut net = SpikingNetwork::builder()
         .threshold(0.5)
-        .top_k(100)
+        .top_k(90)
         .input_layer(784, 12, INPUT_DIM) // This is the actual input
         .layer(500, 10) // First layer
         .layer(300, 5)
