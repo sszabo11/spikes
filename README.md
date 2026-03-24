@@ -20,7 +20,7 @@ Demonstrate spiking neural networks in traditional settings
 ## Goal 2:
 Push architecture to its limit and discover bounds
 - Tune model to optimal ability
-- Provide correct data
+- Provide optimal data
 
 ## Goal 3:
 Expand architecture to multi-modal, online and continous learning

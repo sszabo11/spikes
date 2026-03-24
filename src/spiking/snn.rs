@@ -10,13 +10,14 @@ pub struct SpikingNetwork {
     n_layers: usize,
     n_conns: usize,
     n_neurons: usize,
-    layers: Vec<SpikingLayer>,
+    pub layers: Vec<SpikingLayer>,
 
-    pub tau_pre: f32, // Decay rate for pre_trace
+    pub tau_pre: f32, // Decay rate for pre trace
     pub tau_post: f32,
     pub w_plus: f32,  // Weight update when strengthed
     pub w_minus: f32, // Weight update when weakened
 
+    top_k: usize,
     pub w_min: f32, // Min weight value
     pub w_max: f32, // Max weight value
 
@@ -33,14 +34,27 @@ pub struct SpikingBuilder {
     n_conns: usize,
     n_neurons: usize,
 
+    top_k: usize,
+    tau_post: f32,
+    tau_pre: f32,
+    threshold: f32,
+
     pub T: usize, // Timesteps
 }
 
 impl SpikingBuilder {
-    pub fn input_layer(mut self, num_neurons: usize, num_conns: usize) -> Self {
+    pub fn input_layer(mut self, num_neurons: usize, num_conns: usize, input_len: usize) -> Self {
+        assert!(self.threshold != -10.0, "Please specify threshold");
         assert!(self.n_layers == 0 && self.layers.is_empty());
-        self.layers
-            .push(SpikingLayer::new(0, num_neurons, num_conns));
+        self.layers.push(SpikingLayer::new(
+            input_len,
+            num_neurons,
+            num_conns,
+            self.tau_pre,
+            self.tau_post,
+            self.threshold,
+            self.top_k,
+        ));
 
         self.n_layers = 1;
         self.n_neurons += num_neurons;
@@ -58,10 +72,25 @@ impl SpikingBuilder {
         self.beta = beta;
         self
     }
+    pub fn threshold(mut self, threshold: f32) -> Self {
+        self.threshold = threshold;
+        self
+    }
+    pub fn top_k(mut self, top_k: usize) -> Self {
+        self.top_k = top_k;
+        self
+    }
     pub fn layer(mut self, num_neurons: usize, num_conns: usize) -> Self {
         let in_neurons = self.layers[self.n_layers - 1].out_n;
-        self.layers
-            .push(SpikingLayer::new(in_neurons, num_neurons, num_conns));
+        self.layers.push(SpikingLayer::new(
+            in_neurons,
+            num_neurons,
+            num_conns,
+            self.tau_pre,
+            self.tau_post,
+            self.threshold,
+            self.top_k,
+        ));
 
         self.n_layers += 1;
         self.n_neurons += num_neurons;
@@ -70,10 +99,33 @@ impl SpikingBuilder {
         self
     }
 
+    pub fn tau_pre(mut self, tau_pre: f32) -> Self {
+        self.tau_pre = tau_pre;
+        self
+    }
+    pub fn tau_post(mut self, tau_post: f32) -> Self {
+        self.tau_post = tau_post;
+        self
+    }
+
     pub fn build(self) -> SpikingNetwork {
         assert!(
             self.T > 0,
             "Please specify number of timesteps. Example: `builder.timesteps(10)`"
+        );
+
+        assert!(
+            self.top_k > 0,
+            "Please specify top k. The number of winners for each layer"
+        );
+
+        assert!(
+            self.tau_pre > 0.0,
+            "`tay_pre` controls decay rate for pre_trace and must be positive"
+        );
+        assert!(
+            self.tau_post > 0.0,
+            "`tay_post` controls decay rate for post_trace and must be positive"
         );
         assert!(self.n_neurons > 0);
         assert!(self.n_layers > 0);
@@ -86,6 +138,7 @@ impl SpikingBuilder {
             T: self.T,
             w_max: 1.0,
             w_minus: 0.08,
+            top_k: self.top_k,
             n_layers: self.n_layers,
             n_conns: self.n_conns,
             n_neurons: self.n_neurons,
@@ -100,8 +153,12 @@ impl SpikingNetwork {
     pub fn builder() -> SpikingBuilder {
         SpikingBuilder {
             n_layers: 0,
+            threshold: -10.0, // Starting threshold so user specifies
             layers: vec![],
             beta: 0.9,
+            top_k: 0,
+            tau_post: 0.0,
+            tau_pre: 0.0,
             n_conns: 0,
             T: 0,
             n_neurons: 0,
@@ -116,19 +173,30 @@ impl SpikingNetwork {
         }
     }
 
-    pub fn step(&mut self, input: Array1<f32>) {
-        // Layer 0 now has t0 valus
-        self.set_input(input); // TODO: Spike train
+    // Run model. Input is spike train over T steps
+    pub fn run(&mut self, input: Array2<usize>) -> Array1<f32> {
+        let input = input.mapv(|v| v as f32);
 
-        for l in 1..self.n_layers {
-            let (prev_layer, layer) = self.layers.split_at_mut(l);
+        let mut pre_spikes = input.row(0).to_owned();
+        for t in 0..input.nrows() {
+            println!("T: {}", t);
+            // Current timestep values
+            for p in pre_spikes.iter() {
+                println!("Pre: {}", p);
+            }
 
-            let prev_layer = &mut prev_layer[prev_layer.len() - 1];
-            let layer = &mut layer[0];
+            for l in 0..self.n_layers {
+                let layer = self.layers.get_mut(l).unwrap();
+                println!(
+                    "Layer {}: {} in neurons | {} out neurons",
+                    l, layer.in_n, layer.out_n
+                );
+                pre_spikes = layer.step(&pre_spikes);
+            }
         }
-    }
 
-    fn decay(&mut self) {}
+        Array1::zeros(2)
+    }
 
     pub fn forward(&mut self) {
         for l in 1..self.n_layers {
