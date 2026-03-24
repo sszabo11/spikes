@@ -1,5 +1,6 @@
 use ndarray::{Array1, Array2, ArrayView1};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use sdl2::controller;
 
 pub struct SpikingLayer {
     pub in_n: usize,
@@ -25,6 +26,12 @@ pub struct SpikingLayer {
 
     pub wta_k: usize,
 
+    pub a_plus: f32,  // How much to change weight when potentionting
+    pub a_minus: f32, // How much to change weight when depressionting
+    pub w_min: f32,   // Min weight
+    pub w_max: f32,   // Max weight
+
+    learn: bool,
     pub fired: usize,
 }
 
@@ -37,6 +44,11 @@ pub struct LayerConfig {
     pub threshold: f32,
     pub top_k: usize,
     pub id: usize,
+    pub learn: bool,
+    pub a_plus: f32,
+    pub a_minus: f32,
+    pub w_min: f32,
+    pub w_max: f32,
 }
 
 impl SpikingLayer {
@@ -45,7 +57,12 @@ impl SpikingLayer {
             in_n: config.in_n,
             wta_k: config.top_k,
             out_n: config.out_n,
+            a_plus: config.a_plus,
+            a_minus: config.a_minus,
+            learn: config.learn,
             fired: 0,
+            w_min: config.w_min,
+            w_max: config.w_max,
             num_conns: config.num_conns,
             id: config.id,
             tau_pre: config.tau_pre,
@@ -60,7 +77,7 @@ impl SpikingLayer {
             firing_rates: Array1::zeros(config.out_n),
             weights: Array2::random(
                 (config.out_n, config.num_conns),
-                Uniform::new(-1.0, 1.0).unwrap(),
+                Uniform::new(-0.1, 0.3).unwrap(),
             ),
             conns: Array2::random(
                 (config.out_n, config.num_conns),
@@ -81,6 +98,8 @@ impl SpikingLayer {
         self.pre_trace *= self.tau_pre;
         self.post_trace *= self.tau_post;
 
+        self.pre_trace += pre_spikes;
+
         let mut input: Array1<f32> = Array1::zeros(self.out_n);
 
         // Membrane update
@@ -92,7 +111,6 @@ impl SpikingLayer {
                 //println!("Spike: {} | Weight: {}", pre_spikes[conn_idx], weight);
                 input[i] += pre_spikes[conn_idx] * weight;
             }
-            //println!("Neuron membrane: {}v", input[i]);
 
             // If not in refactory update
             if self.refactory[i] == 0 {
@@ -100,16 +118,51 @@ impl SpikingLayer {
             }
         }
 
+        // Subtract 1 from each neurons refactory state
         self.repolarize_neurons();
 
+        // Converts to binary spikes, and filters by winners + thresholds
+        // Mutates `self.neurons`
         self.wta();
 
-        self.neurons.clone()
+        self.post_trace += &self.neurons;
+
+        let post_spikes = self.neurons.clone();
+        if self.learn {
+            self.stdp(pre_spikes, &post_spikes);
+        }
+
+        // Post spikes
+        post_spikes
     }
 
     fn repolarize_neurons(&mut self) {
         for i in 0..self.out_n {
             self.refactory[i] = self.refactory[i].saturating_sub(1);
+        }
+    }
+
+    fn stdp(&mut self, pre_spikes: &Array1<f32>, post_spikes: &Array1<f32>) {
+        for i in 0..self.out_n {
+            if self.refactory[i] > 0 && post_spikes[i] == 0.0 {
+                continue;
+            };
+            let conns = self.conns.row(i);
+
+            for (j, &conn_idx) in conns.iter().enumerate() {
+                let mut dw = 0.0_f32;
+                //println!("Post: {} | Pre: {}", post_spikes[i], pre_spikes[i]);
+                if post_spikes[i] > 0.0 {
+                    dw += self.a_plus * self.pre_trace[conn_idx];
+                }
+
+                if pre_spikes[conn_idx] > 0.0 {
+                    dw -= self.a_minus * self.post_trace[i];
+                }
+                //println!("Update change: {}", dw);
+
+                self.weights[[i, j]] = (self.weights[[i, j]] + dw).clamp(self.w_min, self.w_max);
+            }
         }
     }
 

@@ -18,7 +18,6 @@ pub struct SpikingNetwork {
     pub w_plus: f32,  // Weight update when strengthed
     pub w_minus: f32, // Weight update when weakened
 
-    top_k: usize,
     pub w_min: f32, // Min weight value
     pub w_max: f32, // Max weight value
 
@@ -35,16 +34,22 @@ pub struct SpikingBuilder {
     n_conns: usize,
     n_neurons: usize,
 
-    top_k: usize,
     tau_post: f32,
     tau_pre: f32,
     threshold: f32,
+    learn: bool,
 
     pub T: usize, // Timesteps
 }
 
 impl SpikingBuilder {
-    pub fn input_layer(mut self, num_neurons: usize, num_conns: usize, input_len: usize) -> Self {
+    pub fn input_layer(
+        mut self,
+        num_neurons: usize,
+        num_conns: usize,
+        input_len: usize,
+        k: usize,
+    ) -> Self {
         assert!(self.threshold != -10.0, "Please specify threshold");
         assert!(self.n_layers == 0 && self.layers.is_empty());
         self.layers.push(SpikingLayer::new(LayerConfig {
@@ -54,8 +59,13 @@ impl SpikingBuilder {
             tau_pre: self.tau_pre,
             tau_post: self.tau_post,
             threshold: self.threshold,
-            top_k: self.top_k,
+            top_k: k,
+            learn: self.learn,
             id: 1,
+            w_max: 1.0,
+            w_min: -1.0,
+            a_minus: 0.1,
+            a_plus: 0.1,
         }));
 
         self.n_layers = 1;
@@ -78,11 +88,7 @@ impl SpikingBuilder {
         self.threshold = threshold;
         self
     }
-    pub fn top_k(mut self, top_k: usize) -> Self {
-        self.top_k = top_k;
-        self
-    }
-    pub fn layer(mut self, num_neurons: usize, num_conns: usize) -> Self {
+    pub fn layer(mut self, num_neurons: usize, num_conns: usize, k: usize) -> Self {
         let in_neurons = self.layers[self.n_layers - 1].out_n;
         self.layers.push(SpikingLayer::new(LayerConfig {
             in_n: in_neurons,
@@ -91,8 +97,13 @@ impl SpikingBuilder {
             tau_pre: self.tau_pre,
             tau_post: self.tau_post,
             threshold: self.threshold,
-            top_k: self.top_k,
+            top_k: k,
             id: self.n_layers + 1,
+            learn: self.learn,
+            w_max: 1.0,
+            w_min: -1.0,
+            a_minus: 0.012,
+            a_plus: 0.01,
         }));
 
         self.n_layers += 1;
@@ -118,11 +129,6 @@ impl SpikingBuilder {
         );
 
         assert!(
-            self.top_k > 0,
-            "Please specify top k. The number of winners for each layer"
-        );
-
-        assert!(
             self.tau_pre > 0.0,
             "`tay_pre` controls decay rate for pre_trace and must be positive"
         );
@@ -141,7 +147,6 @@ impl SpikingBuilder {
             T: self.T,
             w_max: 1.0,
             w_minus: 0.08,
-            top_k: self.top_k,
             n_layers: self.n_layers,
             n_conns: self.n_conns,
             n_neurons: self.n_neurons,
@@ -159,7 +164,7 @@ impl SpikingNetwork {
             threshold: -10.0, // Starting threshold so user specifies
             layers: vec![],
             beta: 0.9,
-            top_k: 0,
+            learn: true,
             tau_post: 0.0,
             tau_pre: 0.0,
             n_conns: 0,
