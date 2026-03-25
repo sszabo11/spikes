@@ -1,6 +1,5 @@
-use ndarray::{Array1, Array2, ArrayView1};
+use ndarray::{Array1, Array2};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use sdl2::controller;
 
 pub struct SpikingLayer {
     pub in_n: usize,
@@ -89,7 +88,7 @@ impl SpikingLayer {
     pub fn step(&mut self, pre_spikes: &Array1<f32>) -> Array1<f32> {
         assert!(
             pre_spikes.len() == self.in_n,
-            "Input spikes is not correct Expeteced: {} Got: {}. Layer {}",
+            "Input spikes is not correct. Expected: {} Got: {}. Layer {}",
             self.in_n,
             pre_spikes.len(),
             self.id
@@ -122,12 +121,15 @@ impl SpikingLayer {
         self.repolarize_neurons();
 
         // Converts to binary spikes, and filters by winners + thresholds
-        // Mutates `self.neurons`
-        self.wta();
+        // Returns binary spikes after wta and threshold
+        let post_spikes = self.wta();
 
-        self.post_trace += &self.neurons;
+        // Reset winners
+        self.inhibit_winners(&post_spikes);
 
-        let post_spikes = self.neurons.clone();
+        self.post_trace += &post_spikes;
+
+        //let post_spikes = self.neurons.clone();
         if self.learn {
             self.stdp(pre_spikes, &post_spikes);
         }
@@ -137,8 +139,14 @@ impl SpikingLayer {
     }
 
     fn repolarize_neurons(&mut self) {
-        for i in 0..self.out_n {
-            self.refactory[i] = self.refactory[i].saturating_sub(1);
+        self.refactory.mapv_inplace(|r| r.saturating_sub(1));
+    }
+
+    fn inhibit_winners(&mut self, post: &Array1<f32>) {
+        for (idx, &spike) in post.iter().enumerate() {
+            if spike == 1.0 {
+                self.neurons[idx] = 0.0;
+            };
         }
     }
 
@@ -167,7 +175,7 @@ impl SpikingLayer {
     }
 
     // Winner takes all. Selects neurons above threshold and picks top k winners. Computed before post/pre trace.
-    pub fn wta(&mut self) {
+    pub fn wta(&mut self) -> Array1<f32> {
         let mut neurons: Vec<(usize, f32)> =
             self.neurons.to_vec().into_iter().enumerate().collect();
 
@@ -188,12 +196,14 @@ impl SpikingLayer {
         }
         assert!(wns.len() <= self.wta_k);
 
-        self.neurons.fill(0.0);
+        let mut post = Array1::zeros(self.out_n);
 
         println!("N Winners: {}", wns.len());
         // Set winners to 1.0
         for idx in wns {
-            self.neurons[idx] = 1.0
+            post[idx] = 1.0
         }
+
+        post
     }
 }

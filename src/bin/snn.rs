@@ -1,9 +1,11 @@
+use colored::Colorize;
 use flatland::{data::get_mnist, spiking::snn::SpikingNetwork};
-use ndarray::{Array2, ArrayView2, Axis, array};
+use ndarray::{Array2, array};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-const T: usize = 100;
+const T: usize = 10;
 const INPUT_DIM: usize = 784;
+const EPOCHS: usize = 5;
 
 fn main() {
     let mut net = SpikingNetwork::builder()
@@ -11,8 +13,8 @@ fn main() {
         .input_layer(784, 78, INPUT_DIM, 34) // This is the actual input
         .layer(500, 50, 22) // First layer
         .layer(200, 14, 10)
-        .layer(10, 7, 1)
-        .beta(0.9)
+        .layer(10, 8, 1)
+        .beta(0.95)
         .timesteps(T)
         .tau_pre(0.95)
         .tau_post(0.95)
@@ -20,28 +22,15 @@ fn main() {
 
     let mnist = get_mnist();
 
+    for epoch in 0..EPOCHS {
+        for (i, img) in mnist.iter() {}
+    }
+
     let spike_train = Array2::random((T, 784), Uniform::new(0, 2).unwrap());
 
     net.run(spike_train);
 
-    //let epochs = 200;
-    //for epoch in 0..epochs {
-    //    //for data in 0..100 {
-    //    let input: ArrayView2<f32> = mnist.index_axis(Axis(0), 0);
-    //    assert!(input.len() == 784);
-
-    //    let flattened = input.flatten().to_owned();
-    //    net.reset_all();
-    //    net.set_input(flattened);
-    //    net.forward();
-    //    //}
-    //}
     println!();
-    let output_layer = net.get_output_layer();
-
-    for (n, v) in output_layer.iter().enumerate() {
-        println!("{}: {:?}%", n, v);
-    }
 
     net.print_details();
 
