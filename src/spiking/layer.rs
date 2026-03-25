@@ -47,6 +47,7 @@ pub struct LayerConfig {
     pub a_plus: f32,
     pub a_minus: f32,
     pub w_min: f32,
+    pub beta: f32,
     pub w_max: f32,
 }
 
@@ -66,7 +67,7 @@ impl SpikingLayer {
             id: config.id,
             tau_pre: config.tau_pre,
             tau_post: config.tau_post,
-            beta: 0.9,
+            beta: config.beta,
             pre_trace: Array1::zeros(config.in_n),
             post_trace: Array1::zeros(config.out_n),
             //thresholds: Array1::random(out_n, Uniform::new(0.4, 0.8).unwrap()),
@@ -76,11 +77,11 @@ impl SpikingLayer {
             firing_rates: Array1::zeros(config.out_n),
             weights: Array2::random(
                 (config.out_n, config.num_conns),
-                Uniform::new(-0.1, 0.3).unwrap(),
+                Uniform::new(0.0, 0.3).unwrap(),
             ),
             conns: Array2::random(
                 (config.out_n, config.num_conns),
-                Uniform::new(0, config.in_n - 1).unwrap(),
+                Uniform::new(0, config.in_n).unwrap(),
             ),
         }
     }
@@ -116,13 +117,12 @@ impl SpikingLayer {
                 self.neurons[i] = self.beta * self.neurons[i] + input[i];
             }
         }
-
-        // Subtract 1 from each neurons refactory state
-        self.repolarize_neurons();
-
         // Converts to binary spikes, and filters by winners + thresholds
         // Returns binary spikes after wta and threshold
         let post_spikes = self.wta();
+
+        // Subtract 1 from each neurons refactory state
+        self.repolarize_neurons();
 
         // Reset winners
         self.inhibit_winners(&post_spikes);
@@ -132,10 +132,21 @@ impl SpikingLayer {
         //let post_spikes = self.neurons.clone();
         if self.learn {
             self.stdp(pre_spikes, &post_spikes);
+            self.homeostasis(&post_spikes);
         }
 
         // Post spikes
         post_spikes
+    }
+
+    fn homeostasis(&mut self, post_spikes: &Array1<f32>) {
+        //let target_rate = 0.05;
+        let target_rate = self.wta_k as f32 / self.out_n as f32;
+        for j in 0..self.out_n {
+            self.firing_rates[j] = 0.99 * self.firing_rates[j] + 0.01 * post_spikes[j];
+            let error = self.firing_rates[j] - target_rate;
+            self.thresholds[j] = (self.thresholds[j] + 0.05 * error).clamp(0.05, 5.0);
+        }
     }
 
     fn repolarize_neurons(&mut self) {
@@ -143,9 +154,14 @@ impl SpikingLayer {
     }
 
     fn inhibit_winners(&mut self, post: &Array1<f32>) {
+        let any_winner = post.iter().any(|&s| s > 0.0);
+
         for (idx, &spike) in post.iter().enumerate() {
             if spike == 1.0 {
                 self.neurons[idx] = 0.0;
+                self.refactory[idx] = 3;
+            } else if any_winner {
+                self.refactory[idx] = 15;
             };
         }
     }
@@ -185,20 +201,27 @@ impl SpikingLayer {
 
         let mut wns = Vec::new();
         for (i, v) in neurons.into_iter() {
-            if v >= self.thresholds[i] {
-                wns.push(i);
-                self.refactory[i] = 3;
-                self.fired += 1;
-            }
-            if wns.len() >= self.wta_k || v < self.thresholds[i] {
+            //if v >= self.thresholds[i] {
+            //    wns.push(i);
+            //    //self.refactory[i] = 3;
+            //    self.fired += 1;
+            //}
+            //if wns.len() >= self.wta_k || v < self.thresholds[i] {
+            //    break;
+            //}
+            if wns.len() >= self.wta_k {
                 break;
-            }
+            } // got enough winners
+            if v < self.thresholds[i] {
+                break;
+            } // rest are below threshold
+            wns.push(i);
         }
         assert!(wns.len() <= self.wta_k);
 
         let mut post = Array1::zeros(self.out_n);
 
-        println!("N Winners: {}", wns.len());
+        //println!("N Winners: {}", wns.len());
         // Set winners to 1.0
         for idx in wns {
             post[idx] = 1.0

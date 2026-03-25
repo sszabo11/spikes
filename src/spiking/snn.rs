@@ -40,6 +40,8 @@ pub struct SpikingBuilder {
     tau_pre: f32,
     threshold: f32,
     learn: bool,
+    a_plus: f32,
+    a_minus: f32,
 
     pub T: usize, // Timesteps
 }
@@ -54,6 +56,10 @@ impl SpikingBuilder {
     ) -> Self {
         assert!(self.threshold != -10.0, "Please specify threshold");
         assert!(self.n_layers == 0 && self.layers.is_empty());
+        assert!(self.tau_pre != 0.0, "Please specify `tau_pre`");
+        assert!(self.tau_post != 0.0, "Please specify `tau_post`");
+
+        println!("tay pre: {}", self.tau_pre);
         self.layers.push(SpikingLayer::new(LayerConfig {
             in_n: input_len,
             out_n: num_neurons,
@@ -64,10 +70,11 @@ impl SpikingBuilder {
             top_k: k,
             learn: self.learn,
             id: 1,
-            w_max: 1.0,
-            w_min: -1.0,
-            a_minus: 0.1,
-            a_plus: 0.1,
+            beta: self.beta,
+            w_max: 1.5,
+            w_min: 0.0,
+            a_minus: self.a_minus,
+            a_plus: self.a_plus,
         }));
 
         self.n_layers = 1;
@@ -92,6 +99,8 @@ impl SpikingBuilder {
     }
     pub fn layer(mut self, num_neurons: usize, num_conns: usize, k: usize) -> Self {
         let in_neurons = self.layers[self.n_layers - 1].out_n;
+        assert!(self.tau_pre != 0.0, "Please specify `tau_pre`");
+        assert!(self.tau_post != 0.0, "Please specify `tau_post`");
         self.layers.push(SpikingLayer::new(LayerConfig {
             in_n: in_neurons,
             out_n: num_neurons,
@@ -102,10 +111,11 @@ impl SpikingBuilder {
             top_k: k,
             id: self.n_layers + 1,
             learn: self.learn,
+            beta: self.beta,
             w_max: 1.0,
-            w_min: -1.0,
-            a_minus: 0.012,
-            a_plus: 0.01,
+            w_min: 0.0,
+            a_minus: self.a_minus,
+            a_plus: self.a_plus,
         }));
 
         self.n_layers += 1;
@@ -170,6 +180,8 @@ impl SpikingNetwork {
             beta: 0.9,
             learn: true,
             tau_post: 0.0,
+            a_plus: 0.01,
+            a_minus: 0.015,
             tau_pre: 0.0,
             n_conns: 0,
             T: 0,
@@ -188,7 +200,7 @@ impl SpikingNetwork {
     // Run model. Input is spike train over T steps
     pub fn run(&mut self, input: Array2<usize>) -> Array1<f32> {
         let input = input.mapv(|v| v as f32);
-        let mut output: Array1<f32> = Array1::zeros(self.layers.last().unwrap().out_n);
+        let mut spike_counts: Array1<f32> = Array1::zeros(self.layers.last().unwrap().out_n);
 
         for t in 0..input.nrows() {
             let mut pre_spikes = input.row(t).to_owned();
@@ -203,16 +215,14 @@ impl SpikingNetwork {
                 layer.learn = self.learn;
                 pre_spikes = layer.step(&pre_spikes);
             }
+            spike_counts += &pre_spikes
 
-            if t == input.nrows() - 1 {
-                output = pre_spikes
-            }
             // Print and record
-            self.record_outputs();
+            //self.record_outputs();
             //self.print_output_layer()
         }
 
-        output
+        spike_counts
     }
 
     pub fn get_output_active_neuron(&self) -> usize {
@@ -255,12 +265,12 @@ impl SpikingNetwork {
 
         for (n, v) in output_layer.iter().enumerate() {
             if n == winner_idx {
-                println!("{}: {}", n, v.to_string().green());
+                //println!("{}: {}", n, v.to_string().green());
                 let prev = self.output_winner_map.get(&n).unwrap_or(&0);
 
                 self.output_winner_map.insert(n, prev + 1);
             } else {
-                println!("{}: {}", n, v);
+                //println!("{}: {}", n, v);
             }
         }
     }
@@ -348,17 +358,15 @@ impl SpikingNetwork {
     pub fn print_details(&self) {
         let fired: usize = self.layers.iter().map(|l| l.fired).sum();
 
-        let winner = self.get_output_winner();
+        //let winner = self.get_output_winner();
 
         println!(
-            "Neurons: {} | Connections: {} | Threshold: {} | Fired: {} Fired %: {}% | Output winner: {}, {} times",
+            "Neurons: {} | Connections: {} | Threshold: {} | Fired: {} Fired %: {}% ",
             self.n_neurons,
             self.n_conns * self.n_neurons,
             self.layers[0].thresholds[0],
             fired,
             fired as f32 / self.n_neurons as f32 * 100.0 / self.T as f32,
-            winner.0,
-            winner.1,
         );
     }
 }

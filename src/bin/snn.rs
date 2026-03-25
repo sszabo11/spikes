@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use colored::Colorize;
 use flatland::{
     data::{MnistData, get_mnist, img_to_train},
@@ -8,21 +6,20 @@ use flatland::{
 use ndarray::{Array1, Array2, array};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-const T: usize = 10;
+const T: usize = 20;
 const INPUT_DIM: usize = 784;
 const EPOCHS: usize = 3;
 
 fn main() {
     let mut net = SpikingNetwork::builder()
-        .threshold(0.5)
-        .input_layer(784, 78, INPUT_DIM, 34) // This is the actual input
-        .layer(500, 80, 22) // First layer
-        //.layer(200, 14, 10)
-        .layer(10, 100, 1)
-        .beta(0.6)
-        .timesteps(T)
         .tau_pre(0.95)
         .tau_post(0.95)
+        .threshold(0.5)
+        .beta(0.99)
+        .input_layer(784, 100, INPUT_DIM, 34)
+        .layer(500, 30, 22)
+        .layer(10, 50, 1)
+        .timesteps(T)
         .build();
 
     let mnist: MnistData = get_mnist();
@@ -39,11 +36,12 @@ fn main() {
     //let classify_map: HashMap<u8, Vec<u32>> = HashMap::new();
     let mut voting = vec![vec![0usize; n_classes]; n_output];
 
-    let n_out = net.layers.last().unwrap().out_n;
-    //let mut output_spikes: Array1<f32> = Array1::zeros(n_out);
-
     for epoch in 0..EPOCHS {
         println!("Epoch: {}", epoch);
+        println!(
+            "Firing rate: {} | Thresholds: {}",
+            net.layers[0].firing_rates, net.layers[0].thresholds
+        );
         for i in 0..training_images.nrows() {
             net.reset();
             let img = training_images.row(i);
@@ -75,6 +73,19 @@ fn main() {
         }
     }
     println!("Voting: {:?}", voting);
+    let mut o_fired = 0;
+    voting
+        .iter()
+        .for_each(|a| a.iter().for_each(|b| o_fired += b));
+
+    let percant = o_fired as f32 / (training_images.nrows() * EPOCHS) as f32;
+    println!(
+        "Outputs Fired: {} out of {} = {}%",
+        o_fired,
+        n_output * training_images.nrows() * EPOCHS,
+        percant * 100.0
+    );
+
     // Each output neuron will find top firing digit
     let classifier: Vec<usize> = voting
         .iter_mut()
@@ -101,8 +112,14 @@ fn main() {
         let label = test_labels[i];
 
         let train = img_to_train(&img, T);
-        let output = net.run(train);
-        let active_neuron = net.get_output_active_neuron();
+        let spike_counts = net.run(train);
+        let active_neuron = spike_counts
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        //let active_neuron = net.get_output_active_neuron();
         let prediction = classifier[active_neuron];
         let correct = label == prediction as u8;
         if correct {

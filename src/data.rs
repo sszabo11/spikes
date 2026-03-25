@@ -39,7 +39,7 @@ pub fn get_mnist() -> MnistData {
     }
 }
 
-s pub fn img_to_train(img: &ArrayView1<f32>, timesteps: usize) -> Array2<usize> {
+pub fn img_to_train(img: &ArrayView1<f32>, timesteps: usize) -> Array2<usize> {
     let mut train = Array2::zeros((timesteps, img.len()));
 
     let mut rng = rand::rng();
