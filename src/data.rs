@@ -1,7 +1,15 @@
 use mnist::{Mnist, MnistBuilder};
-use ndarray::{Array3, s};
+use ndarray::{Array1, Array2, Array3, ArrayView1, s};
+use rand::RngExt;
 
-pub fn get_mnist() -> Array3<f32> {
+pub struct MnistData {
+    pub training_images: Array2<f32>,
+    pub training_labels: Vec<u8>,
+    pub test_images: Array2<f32>,
+    pub test_labels: Vec<u8>,
+}
+
+pub fn get_mnist() -> MnistData {
     let Mnist {
         trn_img,
         trn_lbl,
@@ -10,17 +18,37 @@ pub fn get_mnist() -> Array3<f32> {
         ..
     } = MnistBuilder::new()
         .label_format_digit()
-        .training_set_length(10_000)
-        .validation_set_length(10_000)
-        .test_set_length(10_000)
+        .training_set_length(1_000)
+        .validation_set_length(1_000)
+        .test_set_length(100)
         .finalize();
 
-    let image_num = 0;
-    // Can use an Array2 or Array3 here (Array3 for visualization)
-    let train_data = Array3::from_shape_vec((10_000, 28, 28), trn_img)
-        .expect("Error converting images to Array3 struct")
+    let train_data = Array2::from_shape_vec((1_000, 784), trn_img)
+        .expect("Error converting images to Array2 struct")
         .map(|x| *x as f32 / 256.0);
-    println!("{:#.1?}\n", train_data.slice(s![image_num, .., ..]));
 
-    train_data
+    let test_data = Array2::from_shape_vec((100, 784), tst_img)
+        .expect("Error converting images to Array2 struct")
+        .map(|x| *x as f32 / 256.0);
+
+    MnistData {
+        training_images: train_data,
+        training_labels: trn_lbl,
+        test_images: test_data,
+        test_labels: tst_lbl,
+    }
+}
+
+s pub fn img_to_train(img: &ArrayView1<f32>, timesteps: usize) -> Array2<usize> {
+    let mut train = Array2::zeros((timesteps, img.len()));
+
+    let mut rng = rand::rng();
+
+    for t in 0..timesteps {
+        for (j, &p) in img.iter().enumerate() {
+            train[[t, j]] = if rng.random::<f32>() < p { 1 } else { 0 };
+        }
+    }
+
+    train
 }

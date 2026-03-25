@@ -1,40 +1,139 @@
+use std::collections::HashMap;
+
 use colored::Colorize;
-use flatland::{data::get_mnist, spiking::snn::SpikingNetwork};
-use ndarray::{Array2, array};
+use flatland::{
+    data::{MnistData, get_mnist, img_to_train},
+    spiking::snn::SpikingNetwork,
+};
+use ndarray::{Array1, Array2, array};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 const T: usize = 10;
 const INPUT_DIM: usize = 784;
-const EPOCHS: usize = 5;
+const EPOCHS: usize = 3;
 
 fn main() {
     let mut net = SpikingNetwork::builder()
         .threshold(0.5)
         .input_layer(784, 78, INPUT_DIM, 34) // This is the actual input
-        .layer(500, 50, 22) // First layer
-        .layer(200, 14, 10)
-        .layer(10, 8, 1)
-        .beta(0.95)
+        .layer(500, 80, 22) // First layer
+        //.layer(200, 14, 10)
+        .layer(10, 100, 1)
+        .beta(0.6)
         .timesteps(T)
         .tau_pre(0.95)
         .tau_post(0.95)
         .build();
 
-    let mnist = get_mnist();
+    let mnist: MnistData = get_mnist();
+    let MnistData {
+        training_images,
+        test_images,
+        test_labels,
+        training_labels,
+    } = mnist;
+
+    let n_classes = 10;
+    let n_output = 10;
+    // Digit to each output neurons number fired
+    //let classify_map: HashMap<u8, Vec<u32>> = HashMap::new();
+    let mut voting = vec![vec![0usize; n_classes]; n_output];
+
+    let n_out = net.layers.last().unwrap().out_n;
+    //let mut output_spikes: Array1<f32> = Array1::zeros(n_out);
 
     for epoch in 0..EPOCHS {
-        for (i, img) in mnist.iter() {}
+        println!("Epoch: {}", epoch);
+        for i in 0..training_images.nrows() {
+            net.reset();
+            let img = training_images.row(i);
+
+            let train = img_to_train(&img, T);
+            net.run(train);
+        }
     }
 
-    let spike_train = Array2::random((T, 784), Uniform::new(0, 2).unwrap());
+    net.learn = false;
+    // Count, classify neurons to digits
+    for i in 0..training_images.nrows() {
+        net.reset();
+        let img = training_images.row(i);
+        let label = training_labels[i] as usize;
 
-    net.run(spike_train);
+        let train = img_to_train(&img, T);
+        // Spikes after WTA, thresh, ...
+        let spikes = net.run(train);
+
+        //let spikes = net.get_output_layer();
+        println!("spikes: {}", spikes);
+
+        println!("label: {}", label);
+        for (neuron, &val) in spikes.iter().enumerate() {
+            if val > 0.0 {
+                voting[neuron][label] += val as usize;
+            }
+        }
+    }
+    println!("Voting: {:?}", voting);
+    // Each output neuron will find top firing digit
+    let classifier: Vec<usize> = voting
+        .iter_mut()
+        .map(|digits| {
+            let mut d: Vec<(usize, &usize)> = digits.iter().enumerate().collect();
+            d.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+            let top = d[0];
+
+            // digit to corropsing score
+            top.0
+        })
+        .collect();
+    // classifier[i] corrosponds to output neuron i being classifier[i]'s digit
+    // [1, 0, 6, 5, 7, 0, 0, 0, 1, 0]
+    // Becomes: neuron 0: digit 1, neuron 4: digit 7
+    println!("class: {:?}", classifier);
+
+    // Evaluate
+
+    let mut n_correct = 0;
+    for i in 0..test_images.nrows() {
+        net.reset();
+        let img = test_images.row(i);
+        let label = test_labels[i];
+
+        let train = img_to_train(&img, T);
+        let output = net.run(train);
+        let active_neuron = net.get_output_active_neuron();
+        let prediction = classifier[active_neuron];
+        let correct = label == prediction as u8;
+        if correct {
+            n_correct += 1;
+        }
+        println!(
+            "{}. Expected: {} | Got: {}",
+            if correct {
+                "Correct".green()
+            } else {
+                "Incorrect".red()
+            },
+            label.to_string().yellow(),
+            prediction.to_string().blue()
+        );
+        println!()
+    }
+    println!("Correct: {}", n_correct);
+    println!(
+        "Accuracy: {}%",
+        n_correct as f32 / test_images.nrows() as f32 * 100.0
+    );
+
+    //let spike_train = Array2::random((T, 784), Uniform::new(0, 2).unwrap());
+
+    //net.run(spike_train);
 
     println!();
 
     net.print_details();
 
-    // WTA Test
     //println!("{:?}", output_layer.iter());
 }
 

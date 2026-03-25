@@ -30,7 +30,7 @@ pub struct SpikingLayer {
     pub w_min: f32,   // Min weight
     pub w_max: f32,   // Max weight
 
-    learn: bool,
+    pub learn: bool,
     pub fired: usize,
 }
 

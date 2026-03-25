@@ -21,6 +21,7 @@ pub struct SpikingNetwork {
     pub w_min: f32, // Min weight value
     pub w_max: f32, // Max weight value
 
+    pub learn: bool,
     pub output_winner_map: HashMap<usize, u32>,
     pub T: usize,  // Timesteps
     pub beta: f32, // Leak
@@ -146,6 +147,7 @@ impl SpikingBuilder {
             w_plus: 0.05,
             w_min: -1.0,
             T: self.T,
+            learn: self.learn,
             w_max: 1.0,
             output_winner_map: HashMap::new(),
             w_minus: 0.08,
@@ -186,25 +188,60 @@ impl SpikingNetwork {
     // Run model. Input is spike train over T steps
     pub fn run(&mut self, input: Array2<usize>) -> Array1<f32> {
         let input = input.mapv(|v| v as f32);
+        let mut output: Array1<f32> = Array1::zeros(self.layers.last().unwrap().out_n);
 
         for t in 0..input.nrows() {
             let mut pre_spikes = input.row(t).to_owned();
-            println!("T: {}", t);
+            //println!("T: {}", t);
 
             for l in 0..self.n_layers {
                 let layer = self.layers.get_mut(l).unwrap();
-                println!(
-                    "Layer {}: {} in neurons | {} out neurons",
-                    l, layer.in_n, layer.out_n
-                );
+                //println!(
+                //    "Layer {}: {} in neurons | {} out neurons",
+                //    l, layer.in_n, layer.out_n
+                //);
+                layer.learn = self.learn;
                 pre_spikes = layer.step(&pre_spikes);
             }
 
+            if t == input.nrows() - 1 {
+                output = pre_spikes
+            }
             // Print and record
-            self.print_output_layer()
+            self.record_outputs();
+            //self.print_output_layer()
         }
 
-        Array1::zeros(2)
+        output
+    }
+
+    pub fn get_output_active_neuron(&self) -> usize {
+        let output_layer = self.get_output_layer();
+
+        let vec_n = output_layer.to_vec();
+        let mut ns: Vec<(usize, &f32)> = vec_n.iter().enumerate().collect();
+
+        ns.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+
+        ns[0].0
+    }
+
+    pub fn record_outputs(&mut self) {
+        let output_layer = self.get_output_layer();
+
+        let vec_n = output_layer.to_vec();
+        let mut ns: Vec<(usize, &f32)> = vec_n.iter().enumerate().collect();
+
+        ns.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        let winner_idx = ns[0].0;
+
+        for (n, v) in output_layer.iter().enumerate() {
+            if n == winner_idx {
+                let prev = self.output_winner_map.get(&n).unwrap_or(&0);
+
+                self.output_winner_map.insert(n, prev + 1);
+            }
+        }
     }
 
     pub fn print_output_layer(&mut self) {
@@ -273,16 +310,18 @@ impl SpikingNetwork {
     }
 
     pub fn reset(&mut self) {
-        for i in 1..self.n_layers {
-            let layer = &mut self.layers[i];
-            layer.neurons.fill(0.0);
-        }
-    }
-    pub fn reset_all(&mut self) {
         for layer in self.layers.iter_mut() {
             layer.neurons.fill(0.0);
+            layer.refactory.fill(0);
+            layer.pre_trace.fill(0.0);
+            layer.post_trace.fill(0.0);
         }
     }
+    //pub fn reset_all(&mut self) {
+    //    for layer in self.layers.iter_mut() {
+    //        layer.neurons.fill(0.0);
+    //    }
+    //}
 
     pub fn pretty_print_voltage(&self, layer: usize) {
         let l = &self.layers[layer];
