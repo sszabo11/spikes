@@ -1,5 +1,7 @@
+use colored::Colorize;
 use ndarray::{Array1, Array2};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
 
 pub struct SpikingLayer {
     pub in_n: usize,
@@ -32,6 +34,7 @@ pub struct SpikingLayer {
 
     pub learn: bool,
     pub fired: usize,
+    pub n_winners: u32,
 }
 
 pub struct LayerConfig {
@@ -62,6 +65,7 @@ impl SpikingLayer {
             learn: config.learn,
             fired: 0,
             w_min: config.w_min,
+            n_winners: 0,
             w_max: config.w_max,
             num_conns: config.num_conns,
             id: config.id,
@@ -77,16 +81,20 @@ impl SpikingLayer {
             firing_rates: Array1::zeros(config.out_n),
             weights: Array2::random(
                 (config.out_n, config.num_conns),
-                Uniform::new(0.0, 0.3).unwrap(),
+                Uniform::new(0.15, 0.5).unwrap(),
             ),
-            conns: Array2::random(
-                (config.out_n, config.num_conns),
-                Uniform::new(0, config.in_n).unwrap(),
-            ),
+            conns: generate_connections(config.out_n, config.num_conns, config.in_n),
+            //conns: Array2::random(
+            //    (config.out_n, config.num_conns),
+            //    Uniform::new(0, config.in_n).unwrap(),
+            //),
         }
     }
 
     pub fn step(&mut self, pre_spikes: &Array1<f32>) -> Array1<f32> {
+        // Subtract 1 from each neurons refactory state
+        self.repolarize_neurons();
+        self.n_winners = 0;
         assert!(
             pre_spikes.len() == self.in_n,
             "Input spikes is not correct. Expected: {} Got: {}. Layer {}",
@@ -112,6 +120,7 @@ impl SpikingLayer {
                 input[i] += pre_spikes[conn_idx] * weight;
             }
 
+            //println!("ref: {}", self.refactory[i]);
             // If not in refactory update
             if self.refactory[i] == 0 {
                 self.neurons[i] = self.beta * self.neurons[i] + input[i];
@@ -120,9 +129,6 @@ impl SpikingLayer {
         // Converts to binary spikes, and filters by winners + thresholds
         // Returns binary spikes after wta and threshold
         let post_spikes = self.wta();
-
-        // Subtract 1 from each neurons refactory state
-        self.repolarize_neurons();
 
         // Reset winners
         self.inhibit_winners(&post_spikes);
@@ -145,12 +151,18 @@ impl SpikingLayer {
         for j in 0..self.out_n {
             self.firing_rates[j] = 0.99 * self.firing_rates[j] + 0.01 * post_spikes[j];
             let error = self.firing_rates[j] - target_rate;
-            self.thresholds[j] = (self.thresholds[j] + 0.05 * error).clamp(0.05, 5.0);
+            //print!("Err: {}", error);
+            self.thresholds[j] = (self.thresholds[j] + 0.0001 * error).clamp(0.05, 1.5);
         }
     }
 
     fn repolarize_neurons(&mut self) {
+        //let f = self.refactory.iter().filter(|&r| *r > 0).count();
+        //println!("bef: {}", f);
         self.refactory.mapv_inplace(|r| r.saturating_sub(1));
+        //let af = self.refactory.iter().filter(|&r| *r > 0).count();
+
+        //println!("af: {}", af);
     }
 
     fn inhibit_winners(&mut self, post: &Array1<f32>) {
@@ -159,18 +171,22 @@ impl SpikingLayer {
         for (idx, &spike) in post.iter().enumerate() {
             if spike == 1.0 {
                 self.neurons[idx] = 0.0;
+                self.fired += 1;
+                self.n_winners += 1;
                 self.refactory[idx] = 3;
+                //println!("won :inhibiting {}", self.refactory[idx]);
             } else if any_winner {
-                self.refactory[idx] = 15;
+                self.refactory[idx] = 3;
+                //println!("inhibiting: {}", idx);
             };
         }
     }
 
     fn stdp(&mut self, pre_spikes: &Array1<f32>, post_spikes: &Array1<f32>) {
         for i in 0..self.out_n {
-            if self.refactory[i] > 0 && post_spikes[i] == 0.0 {
-                continue;
-            };
+            //if self.refactory[i] > 0 && post_spikes[i] == 0.0 {
+            //    continue;
+            //};
             let conns = self.conns.row(i);
 
             for (j, &conn_idx) in conns.iter().enumerate() {
@@ -180,12 +196,14 @@ impl SpikingLayer {
                     dw += self.a_plus * self.pre_trace[conn_idx];
                 }
 
-                if pre_spikes[conn_idx] > 0.0 {
+                if pre_spikes[conn_idx] > 0.0 && self.post_trace[i] > 0.0 {
                     dw -= self.a_minus * self.post_trace[i];
                 }
+                let decay = 0.0001 * self.weights[[i, j]];
                 //println!("Update change: {}", dw);
 
-                self.weights[[i, j]] = (self.weights[[i, j]] + dw).clamp(self.w_min, self.w_max);
+                self.weights[[i, j]] =
+                    (self.weights[[i, j]] + dw - decay).clamp(self.w_min, self.w_max);
             }
         }
     }
@@ -229,4 +247,26 @@ impl SpikingLayer {
 
         post
     }
+}
+
+pub fn generate_connections(out_n: usize, num_conns: usize, in_n: usize) -> Array2<usize> {
+    assert!(
+        num_conns <= in_n,
+        "num_conns ({}) cannot exceed in_n ({})",
+        num_conns,
+        in_n
+    );
+
+    let mut rng = StdRng::seed_from_u64(10);
+    let mut conns = Array2::zeros((out_n, num_conns));
+    let mut indices: Vec<usize> = (0..in_n).collect();
+
+    for i in 0..out_n {
+        indices.shuffle(&mut rng);
+        for j in 0..num_conns {
+            conns[[i, j]] = indices[j];
+        }
+    }
+
+    conns
 }

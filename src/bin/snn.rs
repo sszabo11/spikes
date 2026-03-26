@@ -1,23 +1,25 @@
 use colored::Colorize;
 use flatland::{
-    data::{MnistData, get_mnist, img_to_train},
-    spiking::snn::SpikingNetwork,
+    data::{MnistData, encode_deterministic, get_mnist, img_to_train},
+    spiking::{logger::Logger, snn::SpikingNetwork},
 };
 use ndarray::{Array1, Array2, array};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use rand::RngExt;
 
-const T: usize = 20;
+const T: usize = 15;
 const INPUT_DIM: usize = 784;
 const EPOCHS: usize = 3;
 
 fn main() {
     let mut net = SpikingNetwork::builder()
-        .tau_pre(0.95)
-        .tau_post(0.95)
+        .tau_pre(0.9)
+        .tau_post(0.9)
         .threshold(0.5)
-        .beta(0.99)
-        .input_layer(784, 100, INPUT_DIM, 34)
-        .layer(500, 30, 22)
+        .beta(0.9)
+        //.input_layer(784, 120, INPUT_DIM, 84)
+        .input_layer(600, 600, INPUT_DIM, 80)
+        //.layer(80, 35, 40)
         .layer(10, 50, 1)
         .timesteps(T)
         .build();
@@ -30,37 +32,47 @@ fn main() {
         training_labels,
     } = mnist;
 
+    let mut rng = rand::rng();
+    let file = (rng.random::<f32>() * 1000.0).round();
+
+    let mut logger = Logger::new(&format!("./logs/{}.csv", file));
+
     let n_classes = 10;
     let n_output = 10;
-    // Digit to each output neurons number fired
-    //let classify_map: HashMap<u8, Vec<u32>> = HashMap::new();
+
     let mut voting = vec![vec![0usize; n_classes]; n_output];
 
     for epoch in 0..EPOCHS {
         println!("Epoch: {}", epoch);
-        println!(
-            "Firing rate: {} | Thresholds: {}",
-            net.layers[0].firing_rates, net.layers[0].thresholds
-        );
+        //println!(
+        //    "Firing rate: {} | Thresholds: {}",
+        //    net.layers[0].firing_rates, net.layers[0].thresholds
+        //);
         for i in 0..training_images.nrows() {
+            if i % 10 == 0 {
+                for (l, layer) in net.layers.iter().enumerate() {
+                    logger.log(epoch, i, l, layer);
+                }
+            }
             net.reset();
             let img = training_images.row(i);
 
-            let train = img_to_train(&img, T);
-            net.run(train);
+            //let train = img_to_train(&img, T);
+            net.run(img);
         }
     }
 
     net.learn = false;
+
     // Count, classify neurons to digits
     for i in 0..training_images.nrows() {
         net.reset();
         let img = training_images.row(i);
         let label = training_labels[i] as usize;
 
-        let train = img_to_train(&img, T);
+        //let train = img_to_train(&img, T);
         // Spikes after WTA, thresh, ...
-        let spikes = net.run(train);
+        let spikes = net.run(img);
 
         //let spikes = net.get_output_layer();
         println!("spikes: {}", spikes);
@@ -98,10 +110,56 @@ fn main() {
             top.0
         })
         .collect();
+
     // classifier[i] corrosponds to output neuron i being classifier[i]'s digit
     // [1, 0, 6, 5, 7, 0, 0, 0, 1, 0]
     // Becomes: neuron 0: digit 1, neuron 4: digit 7
     println!("class: {:?}", classifier);
+    println!("=== Network diagnostics ===");
+    for (i, layer) in net.layers.iter().enumerate() {
+        println!("\nLayer {}:", i);
+        println!(
+            "  thresholds:   {:?}",
+            layer
+                .thresholds
+                .iter()
+                .map(|x| format!("{:.3}", x))
+                .collect::<Vec<_>>()
+        );
+        println!(
+            "  firing_rates: {:?}",
+            layer
+                .firing_rates
+                .iter()
+                .map(|x| format!("{:.4}", x))
+                .collect::<Vec<_>>()
+        );
+        println!("  avg_weight:   {:.4}", layer.weights.mean().unwrap());
+        println!(
+            "  max_weight:   {:.4}",
+            layer
+                .weights
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max)
+        );
+        println!(
+            "  min_weight:   {:.4}",
+            layer.weights.iter().cloned().fold(f32::INFINITY, f32::min)
+        );
+    }
+
+    println!("\n=== Label assignment ===");
+    println!("Neuron assignments: {:?}", classifier);
+    println!("Unique digits covered: {:?}", {
+        let mut seen = std::collections::HashSet::new();
+        classifier.iter().for_each(|&l| {
+            seen.insert(l);
+        });
+        let mut v: Vec<_> = seen.into_iter().collect();
+        v.sort();
+        v
+    });
 
     // Evaluate
 
@@ -111,8 +169,8 @@ fn main() {
         let img = test_images.row(i);
         let label = test_labels[i];
 
-        let train = img_to_train(&img, T);
-        let spike_counts = net.run(train);
+        //let train = img_to_train(&img, T);
+        let spike_counts = net.run(img);
         let active_neuron = spike_counts
             .iter()
             .enumerate()
@@ -150,6 +208,7 @@ fn main() {
     println!();
 
     net.print_details();
+    println!("Saved to {}.csv", file);
 
     //println!("{:?}", output_layer.iter());
 }

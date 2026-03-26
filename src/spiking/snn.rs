@@ -2,9 +2,12 @@ use std::collections::HashMap;
 
 use colored::Colorize;
 
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1};
 
-use crate::spiking::layer::{LayerConfig, SpikingLayer};
+use crate::{
+    data::encode_deterministic,
+    spiking::layer::{LayerConfig, SpikingLayer},
+};
 
 #[allow(non_snake_case)]
 pub struct SpikingNetwork {
@@ -15,8 +18,6 @@ pub struct SpikingNetwork {
 
     pub tau_pre: f32, // Decay rate for pre trace
     pub tau_post: f32,
-    pub w_plus: f32,  // Weight update when strengthed
-    pub w_minus: f32, // Weight update when weakened
 
     pub w_min: f32, // Min weight value
     pub w_max: f32, // Max weight value
@@ -71,7 +72,7 @@ impl SpikingBuilder {
             learn: self.learn,
             id: 1,
             beta: self.beta,
-            w_max: 1.5,
+            w_max: 0.5,
             w_min: 0.0,
             a_minus: self.a_minus,
             a_plus: self.a_plus,
@@ -112,7 +113,7 @@ impl SpikingBuilder {
             id: self.n_layers + 1,
             learn: self.learn,
             beta: self.beta,
-            w_max: 1.0,
+            w_max: 0.4,
             w_min: 0.0,
             a_minus: self.a_minus,
             a_plus: self.a_plus,
@@ -154,13 +155,11 @@ impl SpikingBuilder {
         SpikingNetwork {
             tau_pre: 0.0,
             tau_post: 0.0,
-            w_plus: 0.05,
-            w_min: -1.0,
             T: self.T,
             learn: self.learn,
             w_max: 1.0,
+            w_min: 0.0,
             output_winner_map: HashMap::new(),
-            w_minus: 0.08,
             n_layers: self.n_layers,
             n_conns: self.n_conns,
             n_neurons: self.n_neurons,
@@ -180,8 +179,8 @@ impl SpikingNetwork {
             beta: 0.9,
             learn: true,
             tau_post: 0.0,
-            a_plus: 0.01,
-            a_minus: 0.015,
+            a_plus: 0.06,
+            a_minus: 0.06,
             tau_pre: 0.0,
             n_conns: 0,
             T: 0,
@@ -198,12 +197,13 @@ impl SpikingNetwork {
     }
 
     // Run model. Input is spike train over T steps
-    pub fn run(&mut self, input: Array2<usize>) -> Array1<f32> {
-        let input = input.mapv(|v| v as f32);
+    pub fn run(&mut self, input: ArrayView1<f32>) -> Array1<f32> {
+        //let input = input.mapv(|v| v as f32);
         let mut spike_counts: Array1<f32> = Array1::zeros(self.layers.last().unwrap().out_n);
 
-        for t in 0..input.nrows() {
-            let mut pre_spikes = input.row(t).to_owned();
+        for t in 0..self.T {
+            let mut pre_spikes = encode_deterministic(&input.view(), t, self.T);
+            //let mut pre_spikes = input.row(t).to_owned();
             //println!("T: {}", t);
 
             for l in 0..self.n_layers {
