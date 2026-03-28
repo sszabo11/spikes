@@ -1,4 +1,3 @@
-use colored::Colorize;
 use ndarray::{Array1, Array2};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
@@ -81,7 +80,7 @@ impl SpikingLayer {
             firing_rates: Array1::zeros(config.out_n),
             weights: Array2::random(
                 (config.out_n, config.num_conns),
-                Uniform::new(0.15, 0.5).unwrap(),
+                Uniform::new(0.9, 1.1).unwrap(),
             ),
             conns: generate_connections(config.out_n, config.num_conns, config.in_n),
             //conns: Array2::random(
@@ -152,7 +151,7 @@ impl SpikingLayer {
             self.firing_rates[j] = 0.99 * self.firing_rates[j] + 0.01 * post_spikes[j];
             let error = self.firing_rates[j] - target_rate;
             //print!("Err: {}", error);
-            self.thresholds[j] = (self.thresholds[j] + 0.0001 * error).clamp(0.05, 1.5);
+            self.thresholds[j] = (self.thresholds[j] + 0.001 * error).clamp(0.3, 3.5);
         }
     }
 
@@ -173,10 +172,10 @@ impl SpikingLayer {
                 self.neurons[idx] = 0.0;
                 self.fired += 1;
                 self.n_winners += 1;
-                self.refactory[idx] = 3;
+                self.refactory[idx] = 6;
                 //println!("won :inhibiting {}", self.refactory[idx]);
             } else if any_winner {
-                self.refactory[idx] = 3;
+                self.refactory[idx] = 2;
                 //println!("inhibiting: {}", idx);
             };
         }
@@ -190,8 +189,12 @@ impl SpikingLayer {
             let conns = self.conns.row(i);
 
             for (j, &conn_idx) in conns.iter().enumerate() {
+                //if self.weights[[i, j]] < 0.1 {
+                //    println!("W");
+                //}
                 let mut dw = 0.0_f32;
-                //println!("Post: {} | Pre: {}", post_spikes[i], pre_spikes[i]);
+
+                //println!("Post: {} | Pre: {}", post_spikes[i], pre_spikes[conn_idx]);
                 if post_spikes[i] > 0.0 {
                     dw += self.a_plus * self.pre_trace[conn_idx];
                 }
@@ -199,7 +202,7 @@ impl SpikingLayer {
                 if pre_spikes[conn_idx] > 0.0 && self.post_trace[i] > 0.0 {
                     dw -= self.a_minus * self.post_trace[i];
                 }
-                let decay = 0.0001 * self.weights[[i, j]];
+                let decay = 0.0000001 * self.weights[[i, j]];
                 //println!("Update change: {}", dw);
 
                 self.weights[[i, j]] =
@@ -257,7 +260,7 @@ pub fn generate_connections(out_n: usize, num_conns: usize, in_n: usize) -> Arra
         in_n
     );
 
-    let mut rng = StdRng::seed_from_u64(10);
+    let mut rng = rand::rng();
     let mut conns = Array2::zeros((out_n, num_conns));
     let mut indices: Vec<usize> = (0..in_n).collect();
 

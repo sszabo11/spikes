@@ -7,20 +7,20 @@ use ndarray::{Array1, Array2, array};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rand::RngExt;
 
-const T: usize = 15;
+const T: usize = 60;
 const INPUT_DIM: usize = 784;
-const EPOCHS: usize = 3;
+const EPOCHS: usize = 1;
 
 fn main() {
     let mut net = SpikingNetwork::builder()
         .tau_pre(0.9)
         .tau_post(0.9)
-        .threshold(0.5)
-        .beta(0.9)
+        .threshold(1.0)
+        .beta(0.1)
         //.input_layer(784, 120, INPUT_DIM, 84)
-        .input_layer(600, 600, INPUT_DIM, 80)
-        //.layer(80, 35, 40)
-        .layer(10, 50, 1)
+        .input_layer(700, 120, INPUT_DIM, 50)
+        //.layer(300, 45, 50)
+        .layer(10, 5, 1)
         .timesteps(T)
         .build();
 
@@ -50,6 +50,7 @@ fn main() {
         //);
         for i in 0..training_images.nrows() {
             if i % 10 == 0 {
+                //println!("img {}", i);
                 for (l, layer) in net.layers.iter().enumerate() {
                     logger.log(epoch, i, l, layer);
                 }
@@ -58,7 +59,7 @@ fn main() {
             let img = training_images.row(i);
 
             //let train = img_to_train(&img, T);
-            net.run(img);
+            net.run(img, false);
         }
     }
 
@@ -68,11 +69,12 @@ fn main() {
     for i in 0..training_images.nrows() {
         net.reset();
         let img = training_images.row(i);
-        let label = training_labels[i] as usize;
+        //let label = training_labels[i] as usize;
 
+        let label = 5;
         //let train = img_to_train(&img, T);
         // Spikes after WTA, thresh, ...
-        let spikes = net.run(img);
+        let spikes = net.run(img, true);
 
         //let spikes = net.get_output_layer();
         println!("spikes: {}", spikes);
@@ -110,6 +112,23 @@ fn main() {
             top.0
         })
         .collect();
+
+    //let classifier: Vec<Option<usize>> = voting
+    //    .iter()
+    //    .map(|digits| {
+    //        let total: usize = digits.iter().sum();
+    //        if total == 0 {
+    //            return None; // neuron never fired, no assignment
+    //        }
+    //        let best = digits
+    //            .iter()
+    //            .enumerate()
+    //            .max_by_key(|&(_, v)| v)
+    //            .map(|(i, _)| i)
+    //            .unwrap();
+    //        Some(best)
+    //    })
+    //    .collect();
 
     // classifier[i] corrosponds to output neuron i being classifier[i]'s digit
     // [1, 0, 6, 5, 7, 0, 0, 0, 1, 0]
@@ -164,13 +183,21 @@ fn main() {
     // Evaluate
 
     let mut n_correct = 0;
+    let mut fives_correct = 0;
+
+    let n_fives: usize = test_images
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| test_labels[*i] == 5)
+        .collect::<Vec<_>>()
+        .len();
     for i in 0..test_images.nrows() {
         net.reset();
         let img = test_images.row(i);
         let label = test_labels[i];
 
         //let train = img_to_train(&img, T);
-        let spike_counts = net.run(img);
+        let spike_counts = net.run(img, false);
         let active_neuron = spike_counts
             .iter()
             .enumerate()
@@ -179,9 +206,20 @@ fn main() {
             .unwrap();
         //let active_neuron = net.get_output_active_neuron();
         let prediction = classifier[active_neuron];
+        //let prediction = spike_counts
+        //    .iter()
+        //    .enumerate()
+        //    .filter(|(i, _)| classifier[*i].is_some())
+        //    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        //    .and_then(|(i, _)| classifier[i])
+        //    .unwrap_or(0); // fallback to 0 only if no neuron ever fired
         let correct = label == prediction as u8;
         if correct {
             n_correct += 1;
+        }
+
+        if label == 5 && prediction == 5 {
+            fives_correct += 1;
         }
         println!(
             "{}. Expected: {} | Got: {}",
@@ -196,6 +234,10 @@ fn main() {
         println!()
     }
     println!("Correct: {}", n_correct);
+    println!(
+        "Five accuracy: {}",
+        fives_correct as f32 / n_fives as f32 * 100.0
+    );
     println!(
         "Accuracy: {}%",
         n_correct as f32 / test_images.nrows() as f32 * 100.0

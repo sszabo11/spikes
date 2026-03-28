@@ -72,7 +72,7 @@ impl SpikingBuilder {
             learn: self.learn,
             id: 1,
             beta: self.beta,
-            w_max: 0.5,
+            w_max: 4.2,
             w_min: 0.0,
             a_minus: self.a_minus,
             a_plus: self.a_plus,
@@ -113,7 +113,7 @@ impl SpikingBuilder {
             id: self.n_layers + 1,
             learn: self.learn,
             beta: self.beta,
-            w_max: 0.4,
+            w_max: 4.2,
             w_min: 0.0,
             a_minus: self.a_minus,
             a_plus: self.a_plus,
@@ -179,8 +179,8 @@ impl SpikingNetwork {
             beta: 0.9,
             learn: true,
             tau_post: 0.0,
-            a_plus: 0.06,
-            a_minus: 0.06,
+            a_plus: 0.01,
+            a_minus: 0.01,
             tau_pre: 0.0,
             n_conns: 0,
             T: 0,
@@ -197,7 +197,7 @@ impl SpikingNetwork {
     }
 
     // Run model. Input is spike train over T steps
-    pub fn run(&mut self, input: ArrayView1<f32>) -> Array1<f32> {
+    pub fn run(&mut self, input: ArrayView1<f32>, pr: bool) -> Array1<f32> {
         //let input = input.mapv(|v| v as f32);
         let mut spike_counts: Array1<f32> = Array1::zeros(self.layers.last().unwrap().out_n);
 
@@ -214,7 +214,11 @@ impl SpikingNetwork {
                 //);
                 layer.learn = self.learn;
                 pre_spikes = layer.step(&pre_spikes);
+                if pr && l == self.n_layers - 1 {
+                    println!("{}", pre_spikes);
+                }
             }
+
             spike_counts += &pre_spikes
 
             // Print and record
